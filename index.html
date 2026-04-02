@@ -4,8 +4,9 @@
     <title>Temi Beverage Remote</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     
-    <meta name="viewport" content="width=device-width, initial-scale=1.0"><style>
-        body { background: linear-gradient(135deg, #a7b3e8, #ac8ace); color: white; height: 100vh; font-family: sans-serif; }
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body { background: linear-gradient(135deg, #a7b3e8, #ac8ace); color: white; height: 100vh; font-family: sans-serif; margin: 0; }
         .card { border-radius: 20px; background: rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px); border: none; }
         .btn-custom { width: 200px; height: 70px; font-size: 18px; border-radius: 12px; transition: 0.2s; font-weight: bold; }
         .btn-custom:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
@@ -19,7 +20,7 @@
         <h1 class="mb-3">Temi Delivery Control</h1>
         <p class="mb-4 text-white-90">Select a location to send the robot</p>
 
-        <div class="d-flex justify-content-center">
+        <div class="d-flex justify-content-center flex-wrap">
             <button class="btn btn-warning btn-custom m-2" onclick="moveTemi('Pantry')">Go to Pantry</button>
             <button class="btn btn-info btn-custom m-2 text-white" onclick="moveTemi('Gaming')">Go to Gaming</button>
         </div>
@@ -42,54 +43,52 @@
         const database = getDatabase(app);
         const statusDiv = document.getElementById("status");
 
-        // 1. Listen for the 'status' key (Matches Android code)
+        // --- NEW RESET LOGIC ON RELOAD ---
+        // This monitors the connection state. When you refresh, Firebase reconnects.
+        const connectedRef = ref(database, ".info/connected");
+        onValue(connectedRef, (snap) => {
+            if (snap.val() === true) {
+                console.log("Connected to Firebase. Resetting state...");
+                set(ref(database, 'location'), 'none');
+                set(ref(database, 'status'), 'idle');
+            }
+        });
+        // ---------------------------------
+
+        // Listen for status changes from Temi
         onValue(ref(database, 'status'), (snapshot) => {
             const status = snapshot.val();
             if (status) {
-                if (status.toLowerCase().includes("arrived")) {
+                const lowerStatus = status.toLowerCase();
+                if (lowerStatus.includes("arrived")) {
                     statusDiv.innerHTML = `<span class="text-arrival">${status.toUpperCase()} </span>`;
-                } else if (status.toLowerCase().includes("moving")) {
+                } else if (lowerStatus.includes("moving") || lowerStatus.includes("preparing")) {
                     statusDiv.innerHTML = `<span class="badge bg-primary p-2">${status.toUpperCase()}...</span>`;
-                } else if (status.toLowerCase() === "idle") {
+                } else if (lowerStatus === "idle") {
                     statusDiv.innerHTML = `<span class="text-white-50">SYSTEM READY</span>`;
+                } else if (lowerStatus.includes("error") || lowerStatus.includes("blocked")) {
+                    statusDiv.innerHTML = `<span class="badge bg-danger p-2">${status.toUpperCase()}</span>`;
                 } else {
                     statusDiv.innerHTML = `<span>${status}</span>`;
                 }
             }
         });
 
-        // 2. Set the 'location' key directly (Manual override logic)
-        // window.moveTemi = function(locationName) {
-        //     statusDiv.innerHTML = `<span class="text-warning">Sending request...</span>`;
-        //     set(ref(database, 'location'), locationName); 
-        // };
-       // 2. Set the 'location' key with a reset to ensure the robot "wakes up"
-        // window.moveTemi = function(locationName) {
-        //     statusDiv.innerHTML = `<span class="text-dark">Sending request to ${locationName}...</span>`;
-            
-        //     // First, set it to "none" to clear any old state
-        //     set(ref(database, 'location'), "none").then(() => {
-        //         // Then, set the actual target location
-        //         set(ref(database, 'location'), locationName);
-        //     }).catch((error) => {
-        //         statusDiv.innerHTML = `<span class="text-danger">Error: ${error.message}</span>`;
-        //     });
-        // };
-
+        // Function to trigger movement
         window.moveTemi = function(locationName) {
-    // 1. Check if the robot is currently busy
-    const currentStatus = statusDiv.innerText.toLowerCase();
-    if (currentStatus.includes("moving")) {
-        alert("Temi is already on the move! Please wait.");
-        return;
-    }
+            const currentStatus = statusDiv.innerText.toLowerCase();
+            
+            // Basic UI guard to prevent multiple clicks
+            if (currentStatus.includes("moving") || currentStatus.includes("preparing")) {
+                alert("Temi is already on the move! Please wait.");
+                return;
+            }
 
-    statusDiv.innerHTML = `<span class="text-dark">Sending request...</span>`;
-    
-    // 2. Simply set the location. 
-    // We will let the ANDROID app set it back to "none" when it finishes.
-    set(ref(database, 'location'), locationName);
-};
+            statusDiv.innerHTML = `<span class="text-dark">Sending request...</span>`;
+            
+            // Set the new location in Firebase
+            set(ref(database, 'location'), locationName);
+        };
 
     </script>
 </body>
