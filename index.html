@@ -1,95 +1,954 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Temi Beverage Remote</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-        body { background: linear-gradient(135deg, #a7b3e8, #ac8ace); color: white; height: 100vh; font-family: sans-serif; margin: 0; }
-        .card { border-radius: 20px; background: rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px); border: none; }
-        .btn-custom { width: 200px; height: 70px; font-size: 18px; border-radius: 12px; transition: 0.2s; font-weight: bold; }
-        .btn-custom:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
-        #status { margin-top: 20px; font-size: 22px; font-weight: 600; min-height: 40px; }
-        .text-arrival { color: #5f52e8; text-shadow: 0 0 10px rgba(155, 112, 225, 0.5); }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Temi Butler — Order</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <style>
+    :root {
+      --bg-deep: #0f172a;
+      --card: rgba(30, 41, 59, 0.85);
+      --accent: #38bdf8;
+      --accent-2: #a78bfa;
+      --text-muted: #94a3b8;
+    }
+    body {
+      min-height: 100vh;
+      background: radial-gradient(ellipse 120% 80% at 50% -20%, #1e3a5f 0%, var(--bg-deep) 45%),
+        linear-gradient(160deg, #0f172a 0%, #1e1b4b 100%);
+      color: #f1f5f9;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      padding-bottom: 120px;
+    }
+    .hero-title {
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      background: linear-gradient(135deg, #38bdf8, #a78bfa);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .item-card {
+      background: var(--card);
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      border-radius: 16px;
+      padding: 1rem;
+      height: 100%;
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    .item-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+    }
+    .item-picture {
+      width: 100%;
+      aspect-ratio: 1;
+      border-radius: 12px;
+      background: linear-gradient(145deg, rgba(56, 189, 248, 0.15), rgba(167, 139, 250, 0.12));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 3.5rem;
+      overflow: hidden;
+    }
+    .item-picture img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .qty-btn {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      font-weight: 700;
+      font-size: 1.25rem;
+      border: none;
+    }
+    .qty-btn:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+    .qty-minus { background: #334155; color: #fff; }
+    .qty-plus { background: linear-gradient(135deg, #0ea5e9, #8b5cf6); color: #fff; }
+    .section-label {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--text-muted);
+      margin-bottom: 0.75rem;
+    }
+    .submit-bar {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+      background: rgba(15, 23, 42, 0.92);
+      backdrop-filter: blur(12px);
+      border-top: 1px solid rgba(148, 163, 184, 0.15);
+      z-index: 100;
+    }
+    .btn-submit {
+      background: linear-gradient(135deg, #0ea5e9, #7c3aed);
+      border: none;
+      font-weight: 700;
+      padding: 14px 24px;
+      border-radius: 14px;
+    }
+    .btn-submit:disabled {
+      opacity: 0.5;
+    }
+    .spinner-wrap {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .state-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.88);
+      backdrop-filter: blur(8px);
+      z-index: 200;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .state-overlay.active { display: flex; }
+    .state-card {
+      background: var(--card);
+      border-radius: 20px;
+      padding: 2rem;
+      max-width: 420px;
+      text-align: center;
+      border: 1px solid rgba(148, 163, 184, 0.2);
+    }
+    .success-icon {
+      width: 88px;
+      height: 88px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #22c55e, #16a34a);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 1rem;
+      font-size: 2.75rem;
+      color: #fff;
+    }
+    .tap-hint {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+    .stock-badge { font-size: 0.7rem; color: var(--text-muted); }
+    .out-stock { color: #f87171; font-weight: 600; font-size: 0.8rem; }
+    .order-row {
+      background: var(--card);
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      border-radius: 12px;
+      padding: 0.75rem 1rem;
+      font-size: 0.9rem;
+    }
+    .order-row.accepted { border-color: rgba(34, 197, 94, 0.45); }
+    .order-row.cancelled { opacity: 0.75; border-color: rgba(248, 113, 113, 0.35); }
+    #editOrderBanner { background: rgba(234, 179, 8, 0.15) !important; border-color: rgba(234, 179, 8, 0.4) !important; color: #fef3c7 !important; }
+  </style>
 </head>
-<body class="d-flex justify-content-center align-items-center">
+<body>
+  <div class="container py-4 py-md-5">
+    <header class="text-center mb-4">
+      <h1 class="hero-title display-5 mb-2">Temi Butler</h1>
+      <p class="text-secondary mb-0">Beverages &amp; snacks — Living Labs</p>
+    </header>
 
-    <div class="card p-5 text-center shadow-lg">
-        <h1 class="mb-3">Temi Delivery Control</h1>
-        <p class="mb-4 text-white-90">Select a location to send the robot</p>
+    <div id="firebaseError" class="alert alert-danger d-none" role="alert"></div>
 
-        <div class="d-flex justify-content-center flex-wrap">
-            <button class="btn btn-warning btn-custom m-2" onclick="moveTemi('Pantry')">Go to Pantry</button>
-            <button class="btn btn-info btn-custom m-2 text-white" onclick="moveTemi('Gaming')">Go to Gaming</button>
-        </div>
-
-        <div id="status">Connecting to Firebase...</div>
+    <div id="introBanner" class="alert border mb-3 d-none" style="background: rgba(56, 189, 248, 0.12); border-color: rgba(56, 189, 248, 0.35) !important; color: #e2e8f0;">
+      <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+        <p class="mb-0 small flex-grow-1" id="introBannerText"></p>
+        <button type="button" class="btn btn-sm btn-outline-info" id="btnReplayIntro" title="Replay voice">🔊 Play again</button>
+      </div>
     </div>
 
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-app.js";
-        import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-database.js";
+    <div id="editOrderBanner" class="alert border mb-3 d-none" role="status">
+      <span id="editOrderBannerText"></span>
+    </div>
 
-        const firebaseConfig = {
-            apiKey: "AIzaSyCTOREQwSXlET_OH764k5bbwo4hn_GtvHA",
-            authDomain: "temi-beverage-delivery.firebaseapp.com",
-            databaseURL: "https://temi-beverage-delivery-default-rtdb.firebaseio.com",
-            projectId: "temi-beverage-delivery"
+    <div id="ordersPanel" class="mb-4">
+      <p class="section-label">Your orders</p>
+      <p id="ordersEmpty" class="text-secondary small mb-2">No orders yet — add items and submit.</p>
+      <div id="ordersList" class="d-flex flex-column gap-2"></div>
+    </div>
+
+    <p class="section-label">Beverages</p>
+    <div id="rowBeverages" class="row g-3 mb-4"></div>
+
+    <p class="section-label">Snacks (Living Labs rack)</p>
+    <div id="rowSnacks" class="row g-3 mb-3"></div>
+  </div>
+
+  <div class="submit-bar">
+    <div class="container d-flex align-items-center justify-content-between gap-3">
+      <div class="d-flex flex-column">
+        <div class="small text-secondary">
+          <span id="cartSummary">No items selected</span>
+        </div>
+        <div id="orderFooterStatus" class="small d-none" style="margin-top:4px;">
+          <span class="spinner-border spinner-border-sm text-info align-middle me-2" role="status" aria-hidden="true"></span>
+          <span id="orderFooterStatusText" class="text-secondary">Waiting for admin…</span>
+        </div>
+      </div>
+      <button type="button" class="btn btn-submit text-white" id="btnSubmit" disabled>Submit order</button>
+    </div>
+  </div>
+
+  <!-- Waiting overlay removed: we keep browsing like a food app; status is shown in the footer. -->
+
+  <!-- Tap to enable voice (browser policy) -->
+  <div id="overlayTap" class="state-overlay active" style="z-index: 150;">
+    <div class="state-card">
+      <p class="mb-3">Tap anywhere to start and hear the welcome message.</p>
+      <p class="tap-hint mb-0">Required on some browsers for voice.</p>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-app.js";
+    import {
+      getDatabase,
+      ref,
+      onValue,
+      push,
+      set,
+      get,
+      update,
+      serverTimestamp,
+    } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-database.js";
+
+    /** Set once Firebase initializes; used by order actions. */
+    let db = null;
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyCTOREQwSXlET_OH764k5bbwo4hn_GtvHA",
+      authDomain: "temi-beverage-delivery.firebaseapp.com",
+      databaseURL: "https://temi-beverage-delivery-default-rtdb.firebaseio.com",
+      projectId: "temi-beverage-delivery",
+    };
+
+    const INTRO_TEXT =
+      "Hi ! welcome to the Temi Butler Service. Please choose the beverages and snacks you would like to order";
+
+    const el = (id) => document.getElementById(id);
+
+    /**
+     * Pick a natural US English voice (prefer Samantha / female-friendly).
+     * Names differ by OS (iOS vs Android vs Windows) — we match case-insensitively
+     */
+    function pickEnglishVoice() {
+      const synth = window.speechSynthesis;
+      if (!synth) return null;
+      const voices = synth.getVoices();
+      if (!voices || !voices.length) return null;
+
+      const norm = (s) => (s || "").toLowerCase();
+
+      const exactPreferred = [
+        "Samantha",
+        "Google US English",
+        "Microsoft Zira - English (United States)",
+        "Microsoft Aria Online (Natural) - English (United States)",
+        "Karen",
+        "Moira",
+        "Tessa",
+        "Victoria",
+      ];
+      for (const name of exactPreferred) {
+        const want = norm(name);
+        const found = voices.find((v) => norm(v.name) === want);
+        if (found) return found;
+      }
+
+      const includePreferred = [
+        "samantha",
+        "female",
+        "zira",
+        "aria",
+        "jenny",
+        "michelle",
+        "victoria",
+        "karen",
+        "moira",
+        "tessa",
+      ];
+      const enFirst = voices.filter(
+        (v) => v.lang && norm(v.lang).startsWith("en")
+      );
+      for (const sub of includePreferred) {
+        const found = enFirst.find((v) => norm(v.name).includes(sub));
+        if (found) return found;
+      }
+
+      const maleHint = [
+        "male",
+        "daniel",
+        "fred",
+        "albert",
+        "arthur",
+        "thomas",
+        "david",
+        "oliver",
+        "james",
+        "mark",
+      ];
+      const isMaleish = (v) =>
+        maleHint.some((h) => norm(v.name).includes(h));
+
+      const enUs = enFirst.filter((v) => norm(v.lang).startsWith("en-us"));
+      const enUsOk = enUs.filter((v) => !isMaleish(v));
+      if (enUsOk.length) return enUsOk[0];
+
+      const enOk = enFirst.filter((v) => !isMaleish(v));
+      if (enOk.length) return enOk[0];
+
+      return enUs[0] || enFirst[0] || voices[0];
+    }
+
+    function showIntroTextBanner() {
+      const banner = el("introBanner");
+      const textEl = el("introBannerText");
+      if (banner && textEl) {
+        textEl.textContent = INTRO_TEXT;
+        banner.classList.remove("d-none");
+      }
+    }
+
+    let lastIntroSpeakAt = 0;
+    /** Prevents the auto-welcome from firing twice (timers + voiceschanged used to queue duplicate utterances). */
+    let welcomeAutoPlayed = false;
+
+    /** @param {boolean} forceReplay — true only for "Play again" (always speaks once per tap) */
+    function speakIntro(forceReplay = false) {
+      const synth = window.speechSynthesis;
+      if (!synth) {
+        showIntroTextBanner();
+        return;
+      }
+
+      const trySpeak = () => {
+        if (!synth.getVoices().length) {
+          return;
+        }
+        /* Auto path: speak at most once per page visit. Replay button bypasses this. */
+        if (!forceReplay && welcomeAutoPlayed) {
+          return;
+        }
+        const now = Date.now();
+        if (!forceReplay && now - lastIntroSpeakAt < 700) {
+          return;
+        }
+        lastIntroSpeakAt = now;
+        try {
+          synth.cancel();
+          if (typeof synth.resume === "function") {
+            synth.resume();
+          }
+          const u = new SpeechSynthesisUtterance(INTRO_TEXT);
+          u.lang = "en-US";
+          u.rate = 0.95;
+          u.volume = 1;
+          u.pitch = 1.08;
+          const voice = pickEnglishVoice();
+          if (voice) u.voice = voice;
+          u.onerror = () => {
+            showIntroTextBanner();
+          };
+          synth.speak(u);
+          if (!forceReplay) {
+            welcomeAutoPlayed = true;
+          }
+        } catch (e) {
+          console.warn("speechSynthesis.speak failed", e);
+          showIntroTextBanner();
+        }
+      };
+
+      showIntroTextBanner();
+
+      if (synth.getVoices().length === 0) {
+        synth.addEventListener("voiceschanged", () => trySpeak(), { once: true });
+        setTimeout(() => trySpeak(), 100);
+        setTimeout(() => trySpeak(), 800);
+      } else {
+        trySpeak();
+      }
+    }
+
+    const DEFAULT_INVENTORY = {
+      coke_can: {
+        name: "Coke Can",
+        emoji: "🥤",
+        imageUrl: "",
+        category: "beverage",
+        quantity: 10,
+      },
+      water: {
+        name: "Water",
+        emoji: "💧",
+        imageUrl: "",
+        category: "beverage",
+        quantity: 10,
+      },
+      green_tea: {
+        name: "Green Tea",
+        emoji: "🍵",
+        imageUrl: "",
+        category: "beverage",
+        quantity: 8,
+      },
+      juice: {
+        name: "Juice",
+        emoji: "🧃",
+        imageUrl: "",
+        category: "beverage",
+        quantity: 6,
+      },
+      coffee: {
+        name: "Coffee",
+        emoji: "☕",
+        imageUrl: "",
+        category: "beverage",
+        quantity: 5,
+      },
+      chips: {
+        name: "Chips (Living Labs rack)",
+        emoji: "🍟",
+        imageUrl: "",
+        category: "snack",
+        quantity: 8,
+      },
+      cookies: {
+        name: "Cookies (Living Labs rack)",
+        emoji: "🍪",
+        imageUrl: "",
+        category: "snack",
+        quantity: 10,
+      },
+      chocolate: {
+        name: "Chocolate",
+        emoji: "🍫",
+        imageUrl: "",
+        category: "snack",
+        quantity: 7,
+      },
+      nuts_living_labs: {
+        name: "Mixed Nuts (Living Labs rack)",
+        emoji: "🥜",
+        imageUrl: "",
+        category: "snack",
+        quantity: 6,
+      },
+      granola_bar: {
+        name: "Granola Bar (Living Labs rack)",
+        emoji: "🌾",
+        imageUrl: "",
+        category: "snack",
+        quantity: 9,
+      },
+    };
+
+    let inventory = { ...DEFAULT_INVENTORY };
+    const cart = {};
+    /** @type {string | null} */
+    let editingOrderId = null;
+    let ordersUnsubscribe = null;
+    /** Last snapshot of this user’s orders (so we can re-render right after entering edit mode). */
+    let lastOrdersRows = [];
+
+    const LS_SESSION = "temi_session_id";
+    const LS_ORDER_QUEUE = "temi_order_queue";
+
+    function getOrCreateSessionId() {
+      let s = localStorage.getItem(LS_SESSION);
+      if (!s) {
+        s =
+          typeof crypto !== "undefined" && crypto.randomUUID
+            ? crypto.randomUUID()
+            : "s-" + Date.now() + "-" + Math.random().toString(36).slice(2, 10);
+        localStorage.setItem(LS_SESSION, s);
+      }
+      return s;
+    }
+
+    const sessionId = getOrCreateSessionId();
+
+    function loadOrderQueue() {
+      try {
+        const raw = localStorage.getItem(LS_ORDER_QUEUE);
+        return raw ? JSON.parse(raw) : [];
+      } catch {
+        return [];
+      }
+    }
+
+    function saveOrderQueue(ids) {
+      localStorage.setItem(LS_ORDER_QUEUE, JSON.stringify(ids));
+    }
+
+    function addOrderToQueue(orderId) {
+      const q = loadOrderQueue();
+      if (!q.includes(orderId)) {
+        q.push(orderId);
+        saveOrderQueue(q);
+      }
+    }
+
+    function isMyOrder(orderId, data) {
+      if (!data) return false;
+      if (data.sessionId === sessionId) return true;
+      return loadOrderQueue().includes(orderId);
+    }
+
+    function formatOrderShortId(id) {
+      if (!id) return "";
+      return id.length > 8 ? "…" + id.slice(-6) : id;
+    }
+
+    function formatOrderItems(items) {
+      if (!items || typeof items !== "object") return "—";
+      return Object.keys(items)
+        .filter((k) => items[k] > 0)
+        .map((k) => {
+          const name = inventory[k]?.name || k;
+          return `${name} ×${items[k]}`;
+        })
+        .join(", ");
+    }
+
+    function statusLabel(st) {
+      const s = (st || "").toLowerCase();
+      if (s === "pending" || s === "") return { text: "Queued — waiting for admin", cls: "text-warning" };
+      if (s === "ongoing" || s === "accepted" || s === "complete")
+        return { text: "Accepted — on the way", cls: "text-success" };
+      if (s === "cancelled" || s === "canceled")
+        return { text: "Cancelled", cls: "text-danger" };
+      return { text: st || "Unknown", cls: "text-secondary" };
+    }
+
+    function showFirebaseError(msg) {
+      const box = el("firebaseError");
+      box.textContent = msg;
+      box.classList.remove("d-none");
+    }
+
+    function renderCatalog() {
+      const bev = el("rowBeverages");
+      const snk = el("rowSnacks");
+      bev.innerHTML = "";
+      snk.innerHTML = "";
+
+      Object.keys(inventory).forEach((sku) => {
+        const item = inventory[sku];
+        const row = item.category === "snack" ? snk : bev;
+        const maxQ = Math.max(0, Number(item.quantity) || 0);
+        const qty = cart[sku] || 0;
+        const out = maxQ === 0;
+
+        const col = document.createElement("div");
+        col.className = "col-6 col-md-4 col-lg-3";
+        const imgPart = item.imageUrl
+          ? `<img src="${item.imageUrl}" alt="" loading="lazy" />`
+          : `<span aria-hidden="true">${item.emoji || "📦"}</span>`;
+
+        col.innerHTML = `
+          <div class="item-card">
+            <div class="item-picture">${imgPart}</div>
+            <div class="mt-2 fw-semibold text-center small">${item.name}</div>
+            <div class="stock-badge text-center">${out ? '<span class="out-stock">Out of Stock</span>' : `In stock: ${maxQ}`}</div>
+            <div class="d-flex align-items-center justify-content-center gap-2 mt-2">
+              <button type="button" class="qty-btn qty-minus" data-sku="${sku}" ${qty <= 0 ? "disabled" : ""}>−</button>
+              <span class="fw-bold" style="min-width:2rem; text-align:center" id="qty-${sku}">${qty}</span>
+              <button type="button" class="qty-btn qty-plus" data-sku="${sku}" ${out || qty >= maxQ ? "disabled" : ""}>+</button>
+            </div>
+          </div>`;
+        row.appendChild(col);
+      });
+
+      bev.querySelectorAll(".qty-minus").forEach((b) =>
+        b.addEventListener("click", () => adjustCart(b.dataset.sku, -1))
+      );
+      bev.querySelectorAll(".qty-plus").forEach((b) =>
+        b.addEventListener("click", () => adjustCart(b.dataset.sku, 1))
+      );
+      snk.querySelectorAll(".qty-minus").forEach((b) =>
+        b.addEventListener("click", () => adjustCart(b.dataset.sku, -1))
+      );
+      snk.querySelectorAll(".qty-plus").forEach((b) =>
+        b.addEventListener("click", () => adjustCart(b.dataset.sku, 1))
+      );
+    }
+
+    function adjustCart(sku, delta) {
+      const maxQ = Math.max(0, Number(inventory[sku]?.quantity) || 0);
+      if (maxQ === 0) return;
+      const next = Math.max(0, Math.min(maxQ, (cart[sku] || 0) + delta));
+      if (next === 0) delete cart[sku];
+      else cart[sku] = next;
+      updateCartUi();
+      renderCatalog();
+    }
+
+    function updateCartUi() {
+      const entries = Object.keys(cart).filter((k) => cart[k] > 0);
+      const sum = entries.reduce((a, k) => a + cart[k], 0);
+      el("cartSummary").textContent =
+        sum === 0
+          ? "No items selected"
+          : `${sum} item${sum === 1 ? "" : "s"} in cart`;
+      const btn = el("btnSubmit");
+      if (editingOrderId) {
+        btn.disabled = sum === 0;
+        btn.textContent = "Save changes";
+      } else {
+        btn.disabled = sum === 0;
+        btn.textContent = "Submit order";
+      }
+    }
+
+    function setFooterStatus(mode, customText) {
+      const wrap = el("orderFooterStatus");
+      const text = el("orderFooterStatusText");
+      if (!wrap || !text) return;
+
+      if (mode === "hidden") {
+        wrap.classList.add("d-none");
+        return;
+      }
+
+      wrap.classList.remove("d-none");
+
+      const spinner = wrap.querySelector(".spinner-border");
+      if (mode === "pending") {
+        if (spinner) spinner.classList.remove("d-none");
+        text.className = "text-secondary";
+        text.textContent =
+          customText || "Waiting for admin to accept queued orders…";
+      } else if (mode === "accepted") {
+        if (spinner) spinner.classList.add("d-none");
+        text.className = "text-success fw-semibold";
+        text.textContent = customText || "✓ Order(s) accepted — delivery on the way";
+      } else if (mode === "cancelled") {
+        if (spinner) spinner.classList.add("d-none");
+        text.className = "text-danger fw-semibold";
+        text.textContent = customText || "Cancelled";
+      }
+    }
+
+    function hideWaiting() {
+      setFooterStatus("hidden");
+    }
+
+    function updateFooterFromOrders(rows) {
+      const pending = rows.filter((o) => {
+        const s = (o.status || "pending").toLowerCase();
+        return s === "pending" || s === "";
+      });
+      const accepted = rows.filter((o) => {
+        const s = (o.status || "").toLowerCase();
+        return s === "ongoing" || s === "accepted" || s === "complete";
+      });
+      if (pending.length > 0) {
+        setFooterStatus(
+          "pending",
+          `${pending.length} order(s) in queue — waiting for admin`
+        );
+      } else if (accepted.length > 0 && rows.length > 0) {
+        setFooterStatus("accepted");
+      } else {
+        hideWaiting();
+      }
+    }
+
+    function renderOrdersPanel(rows) {
+      const list = el("ordersList");
+      const empty = el("ordersEmpty");
+      if (!list || !empty) return;
+
+      rows.sort((a, b) => String(a.id || "").localeCompare(String(b.id || "")));
+
+      if (rows.length === 0) {
+        empty.classList.remove("d-none");
+        list.innerHTML = "";
+        return;
+      }
+      empty.classList.add("d-none");
+      list.innerHTML = "";
+
+      rows.forEach((o) => {
+        const st = (o.status || "pending").toLowerCase();
+        const lbl = statusLabel(o.status);
+        const canEdit = st === "pending" || st === "";
+        const isEditingThis =
+          Boolean(editingOrderId) && String(o.id) === String(editingOrderId);
+        const div = document.createElement("div");
+        div.className = "order-row";
+        if (st === "ongoing" || st === "accepted" || st === "complete") {
+          div.classList.add("accepted");
+        }
+        if (st === "cancelled" || st === "canceled") {
+          div.classList.add("cancelled");
+        }
+
+        const shortId = formatOrderShortId(o.id);
+        const line = formatOrderItems(o.items);
+
+        div.innerHTML = `
+          <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
+            <div>
+              <div class="fw-semibold d-flex align-items-center gap-2">
+                <span>Order ${shortId}</span>
+                ${isEditingThis ? `<span class="badge text-bg-warning">Editing</span>` : ``}
+              </div>
+              <div class="small text-secondary mt-1">${line}</div>
+              <div class="small ${lbl.cls} mt-1">${lbl.text}</div>
+            </div>
+            <div class="d-flex flex-wrap gap-1 align-items-center">
+              ${
+                canEdit && !editingOrderId
+                  ? `<button type="button" class="btn btn-sm btn-outline-warning btn-mod" data-id="${o.id}">Modify</button>`
+                  : ``
+              }
+              ${
+                canEdit && editingOrderId && !isEditingThis
+                  ? `<span class="small text-secondary">Finish the edit above first</span>`
+                  : ``
+              }
+            </div>
+          </div>`;
+        list.appendChild(div);
+      });
+    }
+
+    // Event delegation (stable even when orders list re-renders frequently)
+    const ordersListEl = el("ordersList");
+    if (ordersListEl) {
+      ordersListEl.addEventListener("click", (e) => {
+        const t = /** @type {HTMLElement} */ (e.target);
+        if (!t) return;
+        const mod = t.closest && t.closest(".btn-mod");
+        if (mod && mod.dataset && mod.dataset.id) {
+          beginEditOrder(mod.dataset.id);
+        }
+      });
+    }
+
+    function startOrdersListener(db) {
+      if (ordersUnsubscribe) return;
+      const r = ref(db, "orders");
+      ordersUnsubscribe = onValue(r, (snap) => {
+        const rows = [];
+        snap.forEach((child) => {
+          const data = child.val();
+          if (!data) return;
+          if (!isMyOrder(child.key, data)) return;
+          let createdAt = 0;
+          if (data.createdAt && typeof data.createdAt === "number") {
+            createdAt = data.createdAt;
+          }
+          rows.push({
+            id: child.key,
+            ...data,
+            createdAt,
+          });
+        });
+        lastOrdersRows = rows;
+        renderOrdersPanel(rows);
+        updateFooterFromOrders(rows);
+      });
+    }
+
+    async function cancelOrder(orderId) {
+      if (!db) return;
+      if (!confirm("Cancel this order?")) return;
+      try {
+        await update(ref(db, "orders/" + orderId), {
+          status: "cancelled",
+          cancelledAt: serverTimestamp(),
+        });
+      } catch (e) {
+        console.error(e);
+        alert("Could not cancel. Check Firebase rules.");
+      }
+    }
+
+    function beginEditOrder(orderId) {
+      if (!db) return;
+      get(ref(db, "orders/" + orderId))
+        .then((snap) => {
+          const data = snap.val();
+          if (!data || !data.items) return;
+          const st = (data.status || "").toLowerCase();
+          if (st !== "pending" && st !== "") {
+            alert("Only queued orders can be edited.");
+            return;
+          }
+          Object.keys(cart).forEach((k) => delete cart[k]);
+          Object.keys(data.items).forEach((k) => {
+            cart[k] = data.items[k];
+          });
+          editingOrderId = orderId;
+          const b = el("editOrderBanner");
+          const btxt = el("editOrderBannerText");
+          if (b && btxt) {
+            btxt.textContent =
+              "Editing order " + formatOrderShortId(orderId) + " — change quantities below, then Save changes.";
+            b.classList.remove("d-none");
+          }
+          scrollTo({ top: 0, behavior: "smooth" });
+          updateCartUi();
+          renderCatalog();
+          if (lastOrdersRows.length) {
+            renderOrdersPanel(lastOrdersRows);
+          }
+        })
+        .catch((e) => {
+          console.error(e);
+          alert("Could not load order for editing. Check connection/rules.");
+        });
+    }
+
+    function endEditOrder() {
+      editingOrderId = null;
+      const b = el("editOrderBanner");
+      if (b) b.classList.add("d-none");
+      updateCartUi();
+      if (lastOrdersRows.length) {
+        renderOrdersPanel(lastOrdersRows);
+      }
+    }
+
+    async function submitOrder(db) {
+      const items = { ...cart };
+      const keys = Object.keys(items).filter((k) => items[k] > 0);
+      if (keys.length === 0) return;
+
+      try {
+        if (editingOrderId) {
+          const oid = editingOrderId;
+          await update(ref(db, "orders/" + oid), {
+            items,
+            status: "pending",
+            updatedAt: serverTimestamp(),
+          });
+          await set(ref(db, "admin/notification_pending"), true);
+          await set(ref(db, "admin/latest_order_id"), oid);
+          endEditOrder();
+          Object.keys(cart).forEach((k) => delete cart[k]);
+          updateCartUi();
+          renderCatalog();
+          setFooterStatus("accepted", "✓ Changes saved (still queued)");
+          return;
+        }
+
+        const ordersRef = ref(db, "orders");
+        const newRef = push(ordersRef);
+        const orderId = newRef.key;
+        const payload = {
+          items,
+          status: "pending",
+          sessionId,
+          createdAt: serverTimestamp(),
+          source: "customer_web",
         };
 
-        const app = initializeApp(firebaseConfig);
-        const database = getDatabase(app);
-        const statusDiv = document.getElementById("status");
+        await set(newRef, payload);
+        await set(ref(db, "admin/notification_pending"), true);
+        await set(ref(db, "admin/latest_order_id"), orderId);
+        addOrderToQueue(orderId);
+        Object.keys(cart).forEach((k) => delete cart[k]);
+        updateCartUi();
+        renderCatalog();
+      } catch (e) {
+        console.error(e);
+        alert("Could not submit order. Check connection and Firebase rules.");
+      }
+    }
 
-        // --- NEW RESET LOGIC ON RELOAD ---
-        // This monitors the connection state. When you refresh, Firebase reconnects.
-        const connectedRef = ref(database, ".info/connected");
-        onValue(connectedRef, (snap) => {
-            if (snap.val() === true) {
-                console.log("Connected to Firebase. Resetting state...");
-                set(ref(database, 'location'), 'none');
-                set(ref(database, 'status'), 'idle');
-            }
-        });
-        // ---------------------------------
+    // --- Firebase ---
+    try {
+      const app = initializeApp(firebaseConfig);
+      db = getDatabase(app);
+    } catch (e) {
+      showFirebaseError("Firebase failed to initialize.");
+      console.error(e);
+    }
 
-        // Listen for status changes from Temi
-        onValue(ref(database, 'status'), (snapshot) => {
-            const status = snapshot.val();
-            if (status) {
-                const lowerStatus = status.toLowerCase();
-                if (lowerStatus.includes("arrived")) {
-                    statusDiv.innerHTML = `<span class="text-arrival">${status.toUpperCase()} </span>`;
-                } else if (lowerStatus.includes("moving") || lowerStatus.includes("preparing")) {
-                    statusDiv.innerHTML = `<span class="badge bg-primary p-2">${status.toUpperCase()}...</span>`;
-                } else if (lowerStatus === "idle") {
-                    statusDiv.innerHTML = `<span class="text-white-50">SYSTEM READY</span>`;
-                } else if (lowerStatus.includes("error") || lowerStatus.includes("blocked")) {
-                    statusDiv.innerHTML = `<span class="badge bg-danger p-2">${status.toUpperCase()}</span>`;
-                } else {
-                    statusDiv.innerHTML = `<span>${status}</span>`;
-                }
-            }
-        });
+    if (db) {
+      onValue(
+        ref(db, "inventory"),
+        (snap) => {
+          const val = snap.val();
+          if (val && typeof val === "object") {
+            inventory = { ...DEFAULT_INVENTORY };
+            Object.keys(val).forEach((sku) => {
+              if (inventory[sku]) {
+                inventory[sku] = { ...inventory[sku], ...val[sku] };
+              } else {
+                inventory[sku] = { ...val[sku], category: val[sku].category || "snack" };
+              }
+            });
+          }
+          renderCatalog();
+          updateCartUi();
+        },
+        (err) => {
+          console.error(err);
+          showFirebaseError("Could not read inventory. Using offline defaults.");
+          inventory = { ...DEFAULT_INVENTORY };
+          renderCatalog();
+        }
+      );
+    } else {
+      renderCatalog();
+      updateCartUi();
+    }
 
-        // Function to trigger movement
-        window.moveTemi = function(locationName) {
-            const currentStatus = statusDiv.innerText.toLowerCase();
-            
-            // Basic UI guard to prevent multiple clicks
-            if (currentStatus.includes("moving") || currentStatus.includes("preparing")) {
-                alert("Temi is already on the move! Please wait.");
-                return;
-            }
+    el("btnSubmit").addEventListener("click", () => {
+      if (!db) return;
+      submitOrder(db);
+    });
 
-            statusDiv.innerHTML = `<span class="text-dark">Sending request...</span>`;
-            
-            // Set the new location in Firebase
-            set(ref(database, 'location'), locationName);
-        };
+    const overlayTap = el("overlayTap");
 
-    </script>
+    if (db) {
+      try {
+        const legacy = sessionStorage.getItem("temi_active_order_id");
+        if (legacy && !loadOrderQueue().includes(legacy)) {
+          addOrderToQueue(legacy);
+        }
+        sessionStorage.removeItem("temi_active_order_id");
+      } catch {
+        /* ignore */
+      }
+      startOrdersListener(db);
+      if (loadOrderQueue().length > 0) {
+        overlayTap.classList.remove("active");
+      }
+    }
+
+    // Voice + tap overlay
+    function dismissTapOverlay() {
+      overlayTap.classList.remove("active");
+      speakIntro(false);
+      overlayTap.removeEventListener("click", dismissTapOverlay);
+    }
+    overlayTap.addEventListener("click", dismissTapOverlay);
+
+    const btnReplay = el("btnReplayIntro");
+    if (btnReplay) {
+      btnReplay.addEventListener("click", () => speakIntro(true));
+    }
+
+    updateCartUi();
+  </script>
 </body>
 </html>
