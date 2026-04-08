@@ -13,6 +13,3 @@
 .externalNativeBuild
 .cxx
 local.properties
-
-# Ignore nested repo copy (prevents accidentally adding another repo's .git internals)
-Temi-Beverage-Delivery/
