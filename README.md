@@ -1,11 +1,11 @@
 # TemiApplication
 
-Android app for a **Temi** robot that listens to **Firebase Realtime Database** at the **database root** (`location`, `status`, `orders`, …), drives **Charging → Pantry → Gaming** flows, speaks at delivery, and returns **home to Charging** after the guest taps **OK** at the gaming zone (or goes to **Pantry** again if more orders are pending). The manifest registers a **Temi skill** named *Temi Beverage Delivery*.
+Android app for a **Temi** robot that listens to **Firebase Realtime Database** at the **database root** (`location`, `status`, `robot_state`, `active_order_id`, `orders`, …), drives **home base → pantry → gaming** flows, speaks at delivery, and returns **home to `home base`** after the guest taps **OK** at the gaming zone (or goes to **pantry** again if more orders are pending). The manifest registers a **Temi skill** named *Temi Beverage Delivery*.
 
 ## What the screens look like
 
 - **Customer (QR web) — `index.html`**: dark theme catalog with product cards (emoji “picture” or optional `imageUrl`), +/− quantity, and a “Your orders” section (queue + modify). Voice intro plays after the first tap (browser policy).
-- **Admin (web) — `admin.html`**: dark theme dashboard with Inventory and Orders tabs, plus a small “Send Temi to …” dropdown for manual commands. Accept/Start Trip/Dispatch controls drive the robot via Firebase.
+- **Admin (web) — `admin.html`**: dark theme dashboard with Inventory and Orders tabs, plus a small “Send Temi to …” dropdown for manual commands. Inventory updates + Accept / Decline (disabled) + trip controls drive the robot via Firebase.
 - **Temi tablet (Android) — `MainActivity`**: full-screen dark page showing a large status title + subtitle; when Temi arrives at `gaming`, an **OK** button appears for the guest.
 
 ### Temi tablet screen details (Android)
@@ -44,9 +44,10 @@ The Temi screen is a single full-screen page (no navigation UI) with:
     - If stock is insufficient, Accept fails and nothing is decremented.
   - **Start trip** starts movement (only when no order is `ongoing` and Temi isn’t busy):
     - `orders/{orderId}/status = "ongoing"`
+    - sets `active_order_id = "{orderId}"` so Temi can mark it complete after guest OK
     - sets `location = "pantry"` to start pickup leg
-  - When Temi arrives pantry (`status` contains `arrived_pantry`), **Dispatch → Gaming** appears for the `ongoing` order:
-    - sets `location = "gaming"`
+  - When Temi arrives pantry (`robot_state = "arrived_pantry"`), the `ongoing` order shows **Accept** / **Decline** (decline disabled). Pressing **Accept** sends Temi pantry → gaming:
+    - sets `location = "gaming"` (Temi moves Pantry → Gaming)
   - **Decline** button is present but disabled (per PSB)
 - **Notification**:
   - driven by `admin/notification_pending`; pressing OK opens Orders and clears the flag.
@@ -66,7 +67,7 @@ The Temi screen is a single full-screen page (no navigation UI) with:
 
 | Location (code constants) | Role |
 |---------------------------|------|
-| `Charging` (`LOC_CHARGING`) | Home / idle / dock — must match the **exact** name in Temi’s map |
+| `home base` (`LOC_CHARGING`) | Home / idle / dock — must match the **exact** name in Temi’s map |
 | `pantry` (`LOC_PANTRY`) | Stock / load tray |
 | `gaming` (`LOC_GAMING`) | Customer pickup / delivery stop |
 
@@ -75,14 +76,29 @@ The Temi screen is a single full-screen page (no navigation UI) with:
 ## Intended operator flow
 
 1. **Customer submits order** (`index.html`) → creates `orders/{orderId}` with `status="pending"` and sets `admin/notification_pending=true`.
-2. **Admin accepts** (`admin.html`) → reserves inventory (decrements `inventory/*/quantity`) and sets `orders/{orderId}/status="accepted"` (no movement yet).
-3. **Admin starts trip** → sets `status="ongoing"` and sets `location="pantry"` so Temi goes to pantry for pickup.
-4. **Arrived at pantry** (Android) → `status="arrived_pantry"` and `location="none"`; staff loads items.
-5. **Admin dispatches to gaming** → sets `location="gaming"`.
-6. **Arrived at gaming** (Android) → `status="arrived_gaming"`, speaks the delivery line, shows OK button.
-7. **Guest taps OK** (Android) → speaks “Good bye”, then:
-   - if any order is still pending/accepted/ongoing (not delivered/cancelled) → sets `location="pantry"`
-   - else → sets `location="Charging"`
+2. **Admin accepts** (`admin.html`) → reserves inventory (atomically decrements `inventory/*/quantity`) and sets `orders/{orderId}/status="accepted"` (**no movement yet**).
+3. **Admin starts trip** → marks this as the active order and starts the pickup leg:
+   - `orders/{orderId}/status="ongoing"`
+   - `active_order_id = "{orderId}"`
+   - `location="pantry"` (Temi moves home base → pantry)
+4. **Temi arrives at Pantry** (Android) →
+   - `status="arrived_pantry"` + `robot_state="arrived_pantry"`
+   - `location="none"` (so it doesn’t re-trigger navigation)
+   - Staff loads items on Temi.
+5. **Admin dispatches to Gaming** → sets `location="gaming"` (Temi moves Pantry → Gaming).
+6. **Temi arrives at Gaming** (Android) →
+   - `status="arrived_gaming"` + `robot_state="arrived_gaming"`
+   - Temi announces: “Hello! I am Temi Butler. Please collect your order and press OK to confirm.”
+   - **OK button appears** on Temi screen.
+7. **Guest taps OK on Temi** (Android) →
+   - Temi announces: “Thank you for your order. Good bye!”
+   - Marks the active order done in Firebase:
+     - `orders/{active_order_id}/status="complete"`
+     - `orders/{active_order_id}/completedAt=<timestamp>`
+     - clears `active_order_id=""`
+   - Then Temi decides the next destination:
+     - if there is another order needing service → `location="pantry"`
+     - else → `location="home base"`
 
 There is **no** automatic 10s return to Pantry; **Gaming** exit is controlled by **OK** or by external Firebase writes.
 
@@ -90,8 +106,10 @@ There is **no** automatic 10s return to Pantry; **Gaming** exit is controlled by
 
 ```
 root/
-├── location: "none" | "pantry" | "gaming" | "Charging" | ...
+├── location: "none" | "pantry" | "gaming" | "home base" | ...
 ├── status: "idle" | "arrived_pantry" | "arrived_gaming" | ...
+├── robot_state: "idle" | "moving" | "arrived_pantry" | "arrived_gaming" | "blocked"
+├── active_order_id: "" | "{orderId}"
 ├── admin/
 │   └── notification_pending: false
 │   └── latest_order_id: "{orderId}"
@@ -102,15 +120,18 @@ root/
         └── status: "pending" | "ongoing" | "accepted" | "complete" | "delivered" | "cancelled" | ...
         └── sessionId: "{uuid}"
         └── items: { "coke_can": 2, "water": 1, ... }
+        └── completedAt: <timestamp>  (set by Temi after guest presses OK)
 ```
 
 - **`location` / `status`:** Same as before; app reads/writes both.
+- **`robot_state`:** machine-readable state written by Temi Android (used by admin UI instead of substring matching).
+- **`active_order_id`:** set by admin at **Start trip**; Temi uses it to mark the correct order `complete` after guest OK.
 - **`orders`:**
   - customer creates orders with `status="pending"`
   - admin sets `status="accepted"` (accepted, stock reserved, not started)
   - admin sets `status="ongoing"` (trip started)
-  - after completion, admin should mark the served order `delivered`/`complete` so Temi doesn’t treat it as pending work
-- **Temi decision after “Good bye”:** the Android app reads `orders/` once and goes to `pantry` if any order still needs service; otherwise goes to `Charging`.
+  - Temi sets `status="complete"` (and `completedAt`) when the guest presses OK at Gaming
+- **Temi decision after “Good bye”:** the Android app reads `orders/` once and goes to `pantry` if any order still needs service; otherwise goes to `home base`.
 
 ## Architecture
 
@@ -124,7 +145,7 @@ root/
 
 - **Idle / ignore:** `location` is `null`, `none`, or same as last handled command while not moving.
 - **New target:** If the name exists in `robot.getLocations()`, after **3 s** delay → `goTo(target)`.
-- **Arrival (`complete`):** Branch on **Pantry** / **Gaming** / **Charging** (see code); set `location` to `none` where appropriate; **no** auto timer to Pantry.
+- **Arrival (`complete`):** Branch on **pantry** / **gaming** / **home base** (see code); set `location` to `none` where appropriate; **no** auto timer to pantry.
 - **Failure (`abort` / `reject`):** After **7 s**, clear `location` then **500 ms** later retry the same destination.
 
 ## Temi integration

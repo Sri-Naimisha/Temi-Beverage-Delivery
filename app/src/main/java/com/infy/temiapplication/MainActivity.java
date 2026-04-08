@@ -16,13 +16,16 @@ import com.google.firebase.database.DataSnapshot;
 import com.google.firebase.database.DatabaseError;
 import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
+import com.google.firebase.database.ServerValue;
 import com.google.firebase.database.ValueEventListener;
 import com.robotemi.sdk.Robot;
 import com.robotemi.sdk.TtsRequest;
 import com.robotemi.sdk.listeners.OnGoToLocationStatusChangedListener;
 import com.robotemi.sdk.listeners.OnRobotReadyListener;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Temi map location names must match the robot's saved map exactly (see Logcat: TEMI_LOCATIONS).
@@ -33,7 +36,7 @@ public class MainActivity extends AppCompatActivity implements
         OnGoToLocationStatusChangedListener {
 
     /** Home / idle / charging dock — must match {@link Robot#getLocations()} exactly. */
-    private static final String LOC_CHARGING = "Charging";
+    private static final String LOC_CHARGING = "home base";
     private static final String LOC_PANTRY = "pantry";
     private static final String LOC_GAMING = "gaming";
 
@@ -45,10 +48,17 @@ public class MainActivity extends AppCompatActivity implements
     private DatabaseReference locRef;
     private DatabaseReference statusRef;
     private DatabaseReference ordersRef;
+    private DatabaseReference activeOrderIdRef;
+    private DatabaseReference robotStateRef;
 
     private boolean isMoving = false;
     private String lastCommand = "";
     private final Handler navHandler = new Handler(Looper.getMainLooper());
+    /** Cancelled when a new navigation target arrives so stale 3s timers cannot call goTo. */
+    @Nullable
+    private Runnable pendingGoToRunnable;
+    /** After guest OK: delayed read of orders/; cancelled if rescheduled. */
+    private final Runnable postGoodbyeOrdersReadRunnable = this::runPostGoodbyeOrdersDecision;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -64,6 +74,8 @@ public class MainActivity extends AppCompatActivity implements
         locRef = db.getReference("location");
         statusRef = db.getReference("status");
         ordersRef = db.getReference("orders");
+        activeOrderIdRef = db.getReference("active_order_id");
+        robotStateRef = db.getReference("robot_state");
 
         locRef.addValueEventListener(new ValueEventListener() {
             @Override
@@ -89,6 +101,11 @@ public class MainActivity extends AppCompatActivity implements
 
     private void checkAndNavigate(String target) {
         List<String> knownLocations = robot.getLocations();
+        if (knownLocations == null) {
+            Log.e("Nav", "Robot locations not ready yet.");
+            statusRef.setValue("Error: Robot locations not ready");
+            return;
+        }
         boolean exists = false;
         for (String loc : knownLocations) {
             if (loc.equalsIgnoreCase(target)) {
@@ -111,10 +128,15 @@ public class MainActivity extends AppCompatActivity implements
         robot.tiltAngle(0);
 
         statusRef.setValue("Preparing to move...");
+        robotStateRef.setValue("moving");
         statusText.setText(R.string.status_preparing);
         hideGamingOk();
 
-        navHandler.postDelayed(() -> {
+        if (pendingGoToRunnable != null) {
+            navHandler.removeCallbacks(pendingGoToRunnable);
+        }
+        pendingGoToRunnable = () -> {
+            pendingGoToRunnable = null;
             Log.d("NavSystem", "Sending goTo: " + location);
             robot.goTo(location);
             statusRef.setValue("Moving to " + location);
@@ -122,7 +144,8 @@ public class MainActivity extends AppCompatActivity implements
             if (txtWaiting != null) {
                 txtWaiting.setVisibility(View.GONE);
             }
-        }, 3000);
+        };
+        navHandler.postDelayed(pendingGoToRunnable, 3000);
     }
 
     @Override
@@ -148,9 +171,12 @@ public class MainActivity extends AppCompatActivity implements
 
         if (equalsLoc(location, LOC_PANTRY)) {
             statusRef.setValue("arrived_pantry");
+            robotStateRef.setValue("arrived_pantry");
             statusText.setText(R.string.status_arrived_pantry);
             txtWaiting.setText(R.string.subtitle_waiting_pantry);
             txtWaiting.setVisibility(View.VISIBLE);
+            robot.cancelAllTtsRequests();
+            robot.speak(TtsRequest.create("Arrived at pantry. Waiting for staff.", false));
             hideGamingOk();
             locRef.setValue("none");
             return;
@@ -158,6 +184,7 @@ public class MainActivity extends AppCompatActivity implements
 
         if (equalsLoc(location, LOC_GAMING)) {
             statusRef.setValue("arrived_gaming");
+            robotStateRef.setValue("arrived_gaming");
             statusText.setText(R.string.status_arrived_gaming);
             txtWaiting.setText(R.string.subtitle_collect);
             txtWaiting.setVisibility(View.VISIBLE);
@@ -171,6 +198,7 @@ public class MainActivity extends AppCompatActivity implements
 
         if (equalsLoc(location, LOC_CHARGING)) {
             statusRef.setValue("idle");
+            robotStateRef.setValue("idle");
             statusText.setText(R.string.status_idle_home);
             txtWaiting.setText(R.string.subtitle_idle);
             txtWaiting.setVisibility(View.VISIBLE);
@@ -196,8 +224,8 @@ public class MainActivity extends AppCompatActivity implements
     }
 
     /**
-     * After delivery at Gaming: if any order is still pending, go to Pantry next; otherwise return to Charging.
-     * Orders: each child under {@code orders/} may have {@code status}. Pending = not delivered / not cancelled.
+     * After delivery at Gaming: if any order is still pending, go to Pantry next; otherwise return to home base.
+     * Orders: each child under {@code orders/} may have {@code status}. Terminal = delivered, complete, cancelled.
      */
     private void onGamingOkPressed() {
         btnOk.setEnabled(false);
@@ -206,8 +234,49 @@ public class MainActivity extends AppCompatActivity implements
         robot.cancelAllTtsRequests();
         robot.speak(TtsRequest.create(getString(R.string.tts_gaming_goodbye), false));
 
-        // Give the goodbye line a moment before moving.
-        navHandler.postDelayed(() -> ordersRef.addListenerForSingleValueEvent(new ValueEventListener() {
+        // Mark the active order complete only after Firebase confirms writes, then read orders/ (avoids stale snapshot).
+        activeOrderIdRef.addListenerForSingleValueEvent(new ValueEventListener() {
+            @Override
+            public void onDataChange(@NonNull DataSnapshot snap) {
+                String orderId = snap.getValue(String.class);
+                String oid = orderId == null ? "" : orderId.trim();
+                if (oid.isEmpty()) {
+                    schedulePostGoodbyeOrdersRead();
+                    return;
+                }
+                Map<String, Object> updates = new HashMap<>();
+                updates.put("status", "complete");
+                updates.put("completedAt", ServerValue.TIMESTAMP);
+                ordersRef.child(oid).updateChildren(updates, (error, ref) -> {
+                    if (error != null) {
+                        Log.e("Nav", "Mark order complete failed: " + error.getMessage());
+                        schedulePostGoodbyeOrdersRead();
+                        return;
+                    }
+                    activeOrderIdRef.setValue("", (e, r) -> {
+                        if (e != null) {
+                            Log.e("Nav", "Clear active_order_id failed: " + e.getMessage());
+                        }
+                        schedulePostGoodbyeOrdersRead();
+                    });
+                });
+            }
+
+            @Override
+            public void onCancelled(@NonNull DatabaseError error) {
+                schedulePostGoodbyeOrdersRead();
+            }
+        });
+    }
+
+    /** After TTS buffer, read orders once and route to pantry or home base. */
+    private void schedulePostGoodbyeOrdersRead() {
+        navHandler.removeCallbacks(postGoodbyeOrdersReadRunnable);
+        navHandler.postDelayed(postGoodbyeOrdersReadRunnable, 1800);
+    }
+
+    private void runPostGoodbyeOrdersDecision() {
+        ordersRef.addListenerForSingleValueEvent(new ValueEventListener() {
             @Override
             public void onDataChange(@NonNull DataSnapshot snapshot) {
                 boolean pending = hasPendingOrders(snapshot);
@@ -225,7 +294,7 @@ public class MainActivity extends AppCompatActivity implements
                 statusRef.setValue("orders_read_failed_returning_home");
                 locRef.setValue(LOC_CHARGING);
             }
-        }), 1800);
+        });
     }
 
     /**
@@ -249,7 +318,7 @@ public class MainActivity extends AppCompatActivity implements
             return true;
         }
         String s = st.trim();
-        if (s.equalsIgnoreCase("delivered")) {
+        if (s.equalsIgnoreCase("delivered") || s.equalsIgnoreCase("complete")) {
             return false;
         }
         if (s.equalsIgnoreCase("cancelled") || s.equalsIgnoreCase("canceled")) {
@@ -263,6 +332,7 @@ public class MainActivity extends AppCompatActivity implements
         lastCommand = "";
         robot.stopMovement();
         statusRef.setValue("Path Blocked! Retrying...");
+        robotStateRef.setValue("blocked");
         statusText.setText(R.string.status_blocked);
         hideGamingOk();
 
@@ -290,6 +360,7 @@ public class MainActivity extends AppCompatActivity implements
 
             statusRef.setValue("idle");
             locRef.setValue("none");
+            robotStateRef.setValue("idle");
         }
     }
 
@@ -305,5 +376,15 @@ public class MainActivity extends AppCompatActivity implements
         robot.removeOnRobotReadyListener(this);
         robot.removeOnGoToLocationStatusChangedListener(this);
         super.onStop();
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (pendingGoToRunnable != null) {
+            navHandler.removeCallbacks(pendingGoToRunnable);
+            pendingGoToRunnable = null;
+        }
+        navHandler.removeCallbacks(postGoodbyeOrdersReadRunnable);
+        super.onDestroy();
     }
 }

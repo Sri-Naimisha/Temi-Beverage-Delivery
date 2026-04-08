@@ -120,6 +120,10 @@
               <span id="temiStatus" class="fw-semibold">—</span>
             </span>
             <span class="pill">
+              <span class="muted">Robot state:</span>
+              <span id="temiRobotState" class="fw-semibold">—</span>
+            </span>
+            <span class="pill">
               <span class="muted">Location cmd:</span>
               <span id="temiLocation" class="fw-semibold">—</span>
             </span>
@@ -132,7 +136,7 @@
             <div class="input-group input-group-sm" style="width: min(420px, 100%);">
               <span class="input-group-text" style="background: rgba(15,23,42,0.55); color:#cbd5e1; border-color: rgba(148,163,184,0.2);">Send Temi to</span>
               <select class="form-select" id="selManualLocation" style="background: rgba(15,23,42,0.55); color:#e2e8f0; border-color: rgba(148,163,184,0.2);">
-                <option value="Charging">Charging</option>
+                <option value="home base">home base</option>
                 <option value="pantry">pantry</option>
                 <option value="gaming">gaming</option>
               </select>
@@ -303,6 +307,7 @@
     // Temi status + location
     let lastStatus = "";
     let lastLocation = "";
+    let lastRobotState = "";
     onValue(ref(db, "status"), (snap) => {
       lastStatus = snap.val() || "";
       el("temiStatus").textContent = lastStatus || "—";
@@ -311,8 +316,14 @@
       lastLocation = snap.val() || "";
       el("temiLocation").textContent = lastLocation || "—";
     });
+    onValue(ref(db, "robot_state"), (snap) => {
+      lastRobotState = snap.val() || "";
+      el("temiRobotState").textContent = lastRobotState || "—";
+    });
 
     function temiIsBusy() {
+      const rs = String(lastRobotState || "").toLowerCase().trim();
+      if (rs) return rs !== "idle";
       const s = (lastStatus || "").toLowerCase();
       return s.includes("moving") || s.includes("preparing") || s.includes("blocked");
     }
@@ -336,7 +347,7 @@
     el("btnSendManual").addEventListener("click", () => {
       const loc = el("selManualLocation").value;
       const hint =
-        loc === "Charging"
+        loc === "home base"
           ? "admin_manual_to_charging"
           : loc === "pantry"
             ? "admin_manual_to_pantry"
@@ -351,6 +362,8 @@
       try {
         await set(ref(db, "location"), "none");
         await set(ref(db, "status"), "idle");
+        await set(ref(db, "robot_state"), "idle");
+        await set(ref(db, "active_order_id"), "");
       } catch (e) {
         console.error(e);
         alert("Reset failed (check Firebase rules).");
@@ -525,7 +538,7 @@
 
         const showDispatch =
           st === "ongoing" &&
-          (lastStatus || "").toLowerCase().includes("arrived_pantry");
+          String(lastRobotState || "").toLowerCase().trim() === "arrived_pantry";
 
         card.innerHTML = `
           <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
@@ -537,7 +550,7 @@
               <button class="btn btn-sm btn-outline-info btn-accept" data-id="${id}" ${canAccept ? "" : "disabled"} title="Mark accepted (does not move Temi)">Accept</button>
               <button class="btn btn-sm btn-outline-secondary" disabled>Decline</button>
               <button class="btn btn-sm btn-accent text-white btn-start" data-id="${id}" ${canStartTrip ? "" : "disabled"} title="${startTripDisabledReason}">Start trip</button>
-              ${showDispatch ? `<button class="btn btn-sm btn-outline-info btn-dispatch" data-id="${id}">Dispatch → Gaming</button>` : ``}
+              ${showDispatch ? `<button class="btn btn-sm btn-outline-info btn-dispatch" data-id="${id}">Accept</button>` : ``}
             </div>
           </div>
         `;
@@ -636,6 +649,9 @@
             status: "ongoing",
             startedAt: serverTimestamp(),
           });
+
+          // Track the active order so Temi can mark it complete on delivery OK.
+          await set(ref(db, "active_order_id"), id);
 
           // Start pickup leg to pantry
           await set(ref(db, "location"), "pantry");
