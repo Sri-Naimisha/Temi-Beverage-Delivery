@@ -6,33 +6,59 @@ import android.os.Looper;
 import android.util.Log;
 import android.view.View;
 import android.widget.TextView;
+
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 
+import com.google.android.material.button.MaterialButton;
 import com.google.firebase.database.DataSnapshot;
 import com.google.firebase.database.DatabaseError;
 import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
+import com.google.firebase.database.ServerValue;
 import com.google.firebase.database.ValueEventListener;
 import com.robotemi.sdk.Robot;
-import com.robotemi.sdk.listeners.OnRobotReadyListener;
+import com.robotemi.sdk.TtsRequest;
 import com.robotemi.sdk.listeners.OnGoToLocationStatusChangedListener;
+import com.robotemi.sdk.listeners.OnRobotReadyListener;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
+/**
+ * Temi map location names must match the robot's saved map exactly (see Logcat: TEMI_LOCATIONS).
+ * Edit the three constants below if your map uses different labels (e.g. "Charging Area", "Gaming Zone").
+ */
 public class MainActivity extends AppCompatActivity implements
         OnRobotReadyListener,
         OnGoToLocationStatusChangedListener {
 
-    private final String goBacklocation = "Pantry";
+    /** Home / idle / charging dock — must match {@link Robot#getLocations()} exactly. */
+    private static final String LOC_CHARGING = "home base";
+    private static final String LOC_PANTRY = "pantry";
+    private static final String LOC_GAMING = "gaming";
+
     private Robot robot;
     private TextView statusText;
     private TextView txtWaiting;
-    private DatabaseReference locRef, statusRef;
+    private MaterialButton btnOk;
+
+    private DatabaseReference locRef;
+    private DatabaseReference statusRef;
+    private DatabaseReference ordersRef;
+    private DatabaseReference activeOrderIdRef;
+    private DatabaseReference robotStateRef;
 
     private boolean isMoving = false;
     private String lastCommand = "";
     private final Handler navHandler = new Handler(Looper.getMainLooper());
+    /** Cancelled when a new navigation target arrives so stale 3s timers cannot call goTo. */
+    @Nullable
+    private Runnable pendingGoToRunnable;
+    /** After guest OK: delayed read of orders/; cancelled if rescheduled. */
+    private final Runnable postGoodbyeOrdersReadRunnable = this::runPostGoodbyeOrdersDecision;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -41,11 +67,15 @@ public class MainActivity extends AppCompatActivity implements
 
         statusText = findViewById(R.id.statusText);
         txtWaiting = findViewById(R.id.txtWaiting);
+        btnOk = findViewById(R.id.btnOk);
         robot = Robot.getInstance();
 
         FirebaseDatabase db = FirebaseDatabase.getInstance();
         locRef = db.getReference("location");
         statusRef = db.getReference("status");
+        ordersRef = db.getReference("orders");
+        activeOrderIdRef = db.getReference("active_order_id");
+        robotStateRef = db.getReference("robot_state");
 
         locRef.addValueEventListener(new ValueEventListener() {
             @Override
@@ -56,17 +86,26 @@ public class MainActivity extends AppCompatActivity implements
                     return;
                 }
 
-
                 if (!target.equalsIgnoreCase(lastCommand) && !isMoving) {
                     checkAndNavigate(target);
                 }
             }
-            @Override public void onCancelled(@NonNull DatabaseError error) {}
+
+            @Override
+            public void onCancelled(@NonNull DatabaseError error) {
+            }
         });
+
+        btnOk.setOnClickListener(v -> onGamingOkPressed());
     }
 
     private void checkAndNavigate(String target) {
         List<String> knownLocations = robot.getLocations();
+        if (knownLocations == null) {
+            Log.e("Nav", "Robot locations not ready yet.");
+            statusRef.setValue("Error: Robot locations not ready");
+            return;
+        }
         boolean exists = false;
         for (String loc : knownLocations) {
             if (loc.equalsIgnoreCase(target)) {
@@ -89,19 +128,32 @@ public class MainActivity extends AppCompatActivity implements
         robot.tiltAngle(0);
 
         statusRef.setValue("Preparing to move...");
-        statusText.setText("PREPARING...");
+        robotStateRef.setValue("moving");
+        statusText.setText(R.string.status_preparing);
+        hideGamingOk();
 
-        navHandler.postDelayed(() -> {
+        if (pendingGoToRunnable != null) {
+            navHandler.removeCallbacks(pendingGoToRunnable);
+        }
+        pendingGoToRunnable = () -> {
+            pendingGoToRunnable = null;
             Log.d("NavSystem", "Sending goTo: " + location);
             robot.goTo(location);
             statusRef.setValue("Moving to " + location);
-            statusText.setText("MOVING TO " + location.toUpperCase());
-            if (txtWaiting != null) txtWaiting.setVisibility(View.GONE);
-        }, 3000);
+            statusText.setText(getString(R.string.status_moving_to, location));
+            if (txtWaiting != null) {
+                txtWaiting.setVisibility(View.GONE);
+            }
+        };
+        navHandler.postDelayed(pendingGoToRunnable, 3000);
     }
 
     @Override
-    public void onGoToLocationStatusChanged(@NonNull String location, @NonNull String status, int id, @NonNull String desc) {
+    public void onGoToLocationStatusChanged(
+            @NonNull String location,
+            @NonNull String status,
+            int id,
+            @NonNull String desc) {
         runOnUiThread(() -> {
             Log.d("NavStatus", "Loc: " + location + " Status: " + status);
             if (status.equalsIgnoreCase("complete")) {
@@ -113,33 +165,166 @@ public class MainActivity extends AppCompatActivity implements
     }
 
     private void handleArrival(String location) {
-
         isMoving = false;
         lastCommand = "";
         robot.stopMovement();
 
-        if (!location.equalsIgnoreCase(goBacklocation)) {
-
-            statusText.setText("ARRIVED AT " + location.toUpperCase());
-            statusRef.setValue("Arrived at " + location);
-
-
+        if (equalsLoc(location, LOC_PANTRY)) {
+            statusRef.setValue("arrived_pantry");
+            robotStateRef.setValue("arrived_pantry");
+            statusText.setText(R.string.status_arrived_pantry);
+            txtWaiting.setText(R.string.subtitle_waiting_pantry);
+            txtWaiting.setVisibility(View.VISIBLE);
+            robot.cancelAllTtsRequests();
+            robot.speak(TtsRequest.create("Arrived at pantry. Waiting for staff.", false));
+            hideGamingOk();
             locRef.setValue("none");
-
-
-            navHandler.postDelayed(() -> {
-                if (!isMoving) {
-                    statusText.setText("RETURNING TO PANTRY...");
-                    locRef.setValue(goBacklocation);
-                }
-            }, 10000);
-
-        } else {
-            statusText.setText("READY AT PANTRY");
-            statusRef.setValue("idle");
-            locRef.setValue("none");
-            if (txtWaiting != null) txtWaiting.setVisibility(View.VISIBLE);
+            return;
         }
+
+        if (equalsLoc(location, LOC_GAMING)) {
+            statusRef.setValue("arrived_gaming");
+            robotStateRef.setValue("arrived_gaming");
+            statusText.setText(R.string.status_arrived_gaming);
+            txtWaiting.setText(R.string.subtitle_collect);
+            txtWaiting.setVisibility(View.VISIBLE);
+            locRef.setValue("none");
+
+            robot.cancelAllTtsRequests();
+            robot.speak(TtsRequest.create(getString(R.string.tts_gaming_delivery), false));
+            showGamingOk();
+            return;
+        }
+
+        if (equalsLoc(location, LOC_CHARGING)) {
+            statusRef.setValue("idle");
+            robotStateRef.setValue("idle");
+            statusText.setText(R.string.status_idle_home);
+            txtWaiting.setText(R.string.subtitle_idle);
+            txtWaiting.setVisibility(View.VISIBLE);
+            hideGamingOk();
+            locRef.setValue("none");
+            return;
+        }
+
+        statusText.setText(getString(R.string.status_arrived_generic, location));
+        statusRef.setValue("Arrived at " + location);
+        locRef.setValue("none");
+        hideGamingOk();
+    }
+
+    private void showGamingOk() {
+        btnOk.setVisibility(View.VISIBLE);
+        btnOk.setEnabled(true);
+    }
+
+    private void hideGamingOk() {
+        btnOk.setVisibility(View.GONE);
+        btnOk.setEnabled(false);
+    }
+
+    /**
+     * After delivery at Gaming: if any order is still pending, go to Pantry next; otherwise return to home base.
+     * Orders: each child under {@code orders/} may have {@code status}. Terminal = delivered, complete, cancelled.
+     */
+    private void onGamingOkPressed() {
+        btnOk.setEnabled(false);
+        hideGamingOk();
+
+        robot.cancelAllTtsRequests();
+        robot.speak(TtsRequest.create(getString(R.string.tts_gaming_goodbye), false));
+
+        // Mark the active order complete only after Firebase confirms writes, then read orders/ (avoids stale snapshot).
+        activeOrderIdRef.addListenerForSingleValueEvent(new ValueEventListener() {
+            @Override
+            public void onDataChange(@NonNull DataSnapshot snap) {
+                String orderId = snap.getValue(String.class);
+                String oid = orderId == null ? "" : orderId.trim();
+                if (oid.isEmpty()) {
+                    schedulePostGoodbyeOrdersRead();
+                    return;
+                }
+                Map<String, Object> updates = new HashMap<>();
+                updates.put("status", "complete");
+                updates.put("completedAt", ServerValue.TIMESTAMP);
+                ordersRef.child(oid).updateChildren(updates, (error, ref) -> {
+                    if (error != null) {
+                        Log.e("Nav", "Mark order complete failed: " + error.getMessage());
+                        schedulePostGoodbyeOrdersRead();
+                        return;
+                    }
+                    activeOrderIdRef.setValue("", (e, r) -> {
+                        if (e != null) {
+                            Log.e("Nav", "Clear active_order_id failed: " + e.getMessage());
+                        }
+                        schedulePostGoodbyeOrdersRead();
+                    });
+                });
+            }
+
+            @Override
+            public void onCancelled(@NonNull DatabaseError error) {
+                schedulePostGoodbyeOrdersRead();
+            }
+        });
+    }
+
+    /** After TTS buffer, read orders once and route to pantry or home base. */
+    private void schedulePostGoodbyeOrdersRead() {
+        navHandler.removeCallbacks(postGoodbyeOrdersReadRunnable);
+        navHandler.postDelayed(postGoodbyeOrdersReadRunnable, 1800);
+    }
+
+    private void runPostGoodbyeOrdersDecision() {
+        ordersRef.addListenerForSingleValueEvent(new ValueEventListener() {
+            @Override
+            public void onDataChange(@NonNull DataSnapshot snapshot) {
+                boolean pending = hasPendingOrders(snapshot);
+                if (pending) {
+                    statusRef.setValue("order_queue_next_leg_pantry");
+                    locRef.setValue(LOC_PANTRY);
+                } else {
+                    statusRef.setValue("returning_home");
+                    locRef.setValue(LOC_CHARGING);
+                }
+            }
+
+            @Override
+            public void onCancelled(@NonNull DatabaseError error) {
+                statusRef.setValue("orders_read_failed_returning_home");
+                locRef.setValue(LOC_CHARGING);
+            }
+        });
+    }
+
+    /**
+     * True if there is at least one order that still needs a pantry pickup / delivery cycle.
+     */
+    private static boolean hasPendingOrders(@Nullable DataSnapshot ordersSnapshot) {
+        if (ordersSnapshot == null || !ordersSnapshot.exists()) {
+            return false;
+        }
+        for (DataSnapshot child : ordersSnapshot.getChildren()) {
+            if (orderNeedsService(child)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean orderNeedsService(@NonNull DataSnapshot order) {
+        String st = order.child("status").getValue(String.class);
+        if (st == null || st.isEmpty()) {
+            return true;
+        }
+        String s = st.trim();
+        if (s.equalsIgnoreCase("delivered") || s.equalsIgnoreCase("complete")) {
+            return false;
+        }
+        if (s.equalsIgnoreCase("cancelled") || s.equalsIgnoreCase("canceled")) {
+            return false;
+        }
+        return true;
     }
 
     private void handleNavigationFailure(String location) {
@@ -147,7 +332,9 @@ public class MainActivity extends AppCompatActivity implements
         lastCommand = "";
         robot.stopMovement();
         statusRef.setValue("Path Blocked! Retrying...");
-        statusText.setText("BLOCKED - RETRYING");
+        robotStateRef.setValue("blocked");
+        statusText.setText(R.string.status_blocked);
+        hideGamingOk();
 
         navHandler.postDelayed(() -> {
             if (!isMoving) {
@@ -157,22 +344,47 @@ public class MainActivity extends AppCompatActivity implements
         }, 7000);
     }
 
-
-@Override
-public void onRobotReady(boolean ready) {
-    if (ready) {
-
-        robot.hideTopBar(true);
-
-        getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-
-        robot.requestToBeKioskApp();
-
-        statusRef.setValue("idle");
-        locRef.setValue("none");
+    private static boolean equalsLoc(@Nullable String fromRobot, String constant) {
+        return fromRobot != null && fromRobot.equalsIgnoreCase(constant);
     }
-}
 
-    @Override protected void onStart() { super.onStart(); robot.addOnRobotReadyListener(this); robot.addOnGoToLocationStatusChangedListener(this); }
-    @Override protected void onStop() { robot.removeOnRobotReadyListener(this); robot.removeOnGoToLocationStatusChangedListener(this); super.onStop(); }
+    @Override
+    public void onRobotReady(boolean ready) {
+        if (ready) {
+            List<String> locs = robot.getLocations();
+            Log.d("TEMI_LOCATIONS", locs != null ? locs.toString() : "null");
+
+            robot.hideTopBar(true);
+            getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            robot.requestToBeKioskApp();
+
+            statusRef.setValue("idle");
+            locRef.setValue("none");
+            robotStateRef.setValue("idle");
+        }
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        robot.addOnRobotReadyListener(this);
+        robot.addOnGoToLocationStatusChangedListener(this);
+    }
+
+    @Override
+    protected void onStop() {
+        robot.removeOnRobotReadyListener(this);
+        robot.removeOnGoToLocationStatusChangedListener(this);
+        super.onStop();
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (pendingGoToRunnable != null) {
+            navHandler.removeCallbacks(pendingGoToRunnable);
+            pendingGoToRunnable = null;
+        }
+        navHandler.removeCallbacks(postGoodbyeOrdersReadRunnable);
+        super.onDestroy();
+    }
 }

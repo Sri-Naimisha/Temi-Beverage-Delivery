@@ -1,0 +1,87 @@
+{
+  "inventory": {
+    "coke_can": {
+      "name": "Coke Can",
+      "emoji": "🥤",
+      "imageUrl": "",
+      "category": "beverage",
+      "quantity": 10,
+      "customizable": false
+    },
+    "water": {
+      "name": "Water",
+      "emoji": "💧",
+      "imageUrl": "",
+      "category": "beverage",
+      "quantity": 10,
+      "customizable": false
+    },
+    "green_tea": {
+      "name": "Green Tea",
+      "emoji": "🍵",
+      "imageUrl": "",
+      "category": "beverage",
+      "quantity": 8,
+      "customizable": true
+    },
+    "juice": {
+      "name": "Juice",
+      "emoji": "🧃",
+      "imageUrl": "",
+      "category": "beverage",
+      "quantity": 6,
+      "customizable": false
+    },
+    "coffee": {
+      "name": "Coffee",
+      "emoji": "☕",
+      "imageUrl": "",
+      "category": "beverage",
+      "quantity": 5,
+      "customizable": true
+    },
+    "chips": {
+      "name": "Chips (Living Labs rack)",
+      "emoji": "🍟",
+      "imageUrl": "",
+      "category": "snack",
+      "quantity": 8,
+      "customizable": false
+    },
+    "cookies": {
+      "name": "Cookies (Living Labs rack)",
+      "emoji": "🍪",
+      "imageUrl": "",
+      "category": "snack",
+      "quantity": 10,
+      "customizable": false
+    },
+    "chocolate": {
+      "name": "Chocolate",
+      "emoji": "🍫",
+      "imageUrl": "",
+      "category": "snack",
+      "quantity": 7,
+      "customizable": false
+    },
+    "nuts_living_labs": {
+      "name": "Mixed Nuts (Living Labs rack)",
+      "emoji": "🥜",
+      "imageUrl": "",
+      "category": "snack",
+      "quantity": 6,
+      "customizable": false
+    },
+    "granola_bar": {
+      "name": "Granola Bar (Living Labs rack)",
+      "emoji": "🌾",
+      "imageUrl": "",
+      "category": "snack",
+      "quantity": 9,
+      "customizable": false
+    }
+  },
+  "admin": {
+    "notification_pending": false
+  }
+}
